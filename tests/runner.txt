@@ -1,0 +1,59 @@
+"""
+Simple script to run all GoldenFieldGate tests in sequence
+Save each test as a separate file, then run this script
+"""
+
+import os
+import sys
+
+# Create output directory
+os.makedirs('output', exist_ok=True)
+
+print("="*60)
+print("Running GoldenFieldGate Validation Suite")
+print("="*60)
+
+# List of test modules to run
+tests = [
+    "test1_manifold.py",
+    "test2_dynamics.py", 
+    "test3_embeddings.py",
+    "test4_quantum.py",
+    "test5_fibonacci.py",
+    "test6_consciousness.py"
+]
+
+# Instructions if files don't exist
+if not all(os.path.exists(test) for test in tests):
+    print("\nTo run the validation suite:")
+    print("1. Save each test artifact as its corresponding .py file")
+    print("2. Run this script again")
+    print("\nTest files needed:")
+    for test in tests:
+        exists = "✓" if os.path.exists(test) else "✗"
+        print(f"  {exists} {test}")
+    sys.exit(1)
+
+# Run each test
+for i, test_file in enumerate(tests, 1):
+    print(f"\n{'='*60}")
+    print(f"Running Test {i}: {test_file}")
+    print(f"{'='*60}")
+    
+    try:
+        with open(test_file, 'r') as f:
+            code = f.read()
+        
+        # Execute the test
+        exec(code)
+        print(f"\n✓ Test {i} completed")
+        
+    except Exception as e:
+        print(f"\n✗ Test {i} failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+print("\n" + "="*60)
+print("Validation Suite Complete!")
+print("Check the 'output' folder for all visualizations")
+print("="*60)
