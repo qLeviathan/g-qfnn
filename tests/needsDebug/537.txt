@@ -1,0 +1,562 @@
+"""
+Properly Trained Physics Language Model
+======================================
+
+This version actually trains by:
+1. Predicting next tokens
+2. Lowering energy for correct predictions
+3. Forming vortices around patterns
+4. Converging to meaningful states
+"""
+
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import levy_stable
+from typing import Dict, List, Tuple, Optional
+import math
+import requests
+from tqdm import tqdm
+
+# Universal constants
+PHI = (1 + np.sqrt(5)) / 2
+HBAR = 1.0
+C = 1.0
+G = 1.0
+EPS = 1e-8
+
+class ShakespeareTokenizer:
+    """Character tokenizer with special tokens."""
+    
+    def __init__(self, text: str):
+        self.chars = sorted(list(set(text)))
+        self.vocab_size = len(self.chars)
+        self.char_to_idx = {ch: i for i, ch in enumerate(self.chars)}
+        self.idx_to_char = {i: ch for i, ch in enumerate(self.chars)}
+        
+        print(f"📚 Created tokenizer with {self.vocab_size} characters")
+    
+    def encode(self, text: str) -> torch.Tensor:
+        return torch.tensor([self.char_to_idx.get(ch, 0) for ch in text])
+    
+    def decode(self, indices: torch.Tensor) -> str:
+        if indices.is_cuda:
+            indices = indices.cpu()
+        return ''.join([self.idx_to_char.get(idx.item(), '') for idx in indices])
+
+class ProperPhysicsLanguageModel:
+    """
+    Physics LM that actually learns through energy minimization.
+    
+    Key improvements:
+    1. Energy decreases for correct predictions
+    2. Vortices form around repeated patterns
+    3. Proper next-token training
+    4. Convergence to meaningful states
+    """
+    
+    def __init__(self, vocab_size: int, field_dim: int = 128, device: str = 'cuda'):
+        self.vocab_size = vocab_size
+        self.field_dim = field_dim
+        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
+        
+        # Physical parameters
+        self.dt = 0.01
+        self.temperature = 1.0
+        self.learning_rate = 0.1  # How much energy changes with predictions
+        
+        # Initialize quantum field with small random values
+        self.psi = self._initialize_coherent_field()
+        self.momentum = torch.zeros_like(self.psi)
+        
+        # Vorticity and metric
+        self.vorticity = torch.zeros(vocab_size, 3, device=self.device)
+        self.metric = self._initialize_metric()
+        
+        # Pattern memory (stores learned sequences)
+        self.pattern_memory = torch.zeros(vocab_size, vocab_size, device=self.device)
+        
+        # Holographic boundary
+        boundary_size = max(10, int(np.sqrt(vocab_size)))
+        self.holographic_boundary = torch.zeros(
+            boundary_size, field_dim, 2, device=self.device
+        )
+        
+        # Training history
+        self.energy_history = []
+        self.accuracy_history = []
+        self.vorticity_history = []
+        
+        print(f"🌀 Initialized Proper Physics Language Model")
+        print(f"   Vocab: {vocab_size}, Field: {field_dim}")
+        print(f"   Device: {self.device}")
+    
+    def _initialize_coherent_field(self) -> torch.Tensor:
+        """Initialize with coherent state (not random noise)."""
+        psi = torch.zeros(self.vocab_size, self.field_dim, 2, device=self.device)
+        
+        # Create coherent states for each token
+        for i in range(self.vocab_size):
+            # Each token gets a unique phase pattern
+            phase = 2 * np.pi * i / self.vocab_size
+            
+            # Gaussian envelope in field space
+            field_positions = torch.arange(self.field_dim, device=self.device).float()
+            envelope = torch.exp(-(field_positions - self.field_dim/2)**2 / (2 * self.field_dim * 0.1))
+            
+            # Coherent state
+            psi[i, :, 0] = envelope * torch.cos(phase + field_positions * 0.1)
+            psi[i, :, 1] = envelope * torch.sin(phase + field_positions * 0.1)
+        
+        # Normalize
+        norm = torch.sqrt(torch.sum(psi**2) + EPS)
+        return psi / (norm * 10)  # Start with small amplitude
+    
+    def _initialize_metric(self) -> torch.Tensor:
+        """Initialize flat metric (will curve with learning)."""
+        metric = torch.eye(4, device=self.device).unsqueeze(0).repeat(self.vocab_size, 1, 1)
+        metric[:, 0, 0] = -1  # Timelike
+        return metric
+    
+    def train_on_sequence(self, tokens: torch.Tensor) -> Dict[str, float]:
+        """
+        Train by predicting next token and adjusting energy.
+        
+        This is where the physics learns!
+        """
+        if len(tokens) < 2:
+            return {'loss': 0, 'accuracy': 0}
+        
+        total_loss = 0
+        correct_predictions = 0
+        
+        # Process sequence with sliding window
+        for i in range(len(tokens) - 1):
+            context = tokens[:i+1]
+            target = tokens[i+1].item()
+            
+            # Evolve field with context
+            self._inject_context_vortices(context)
+            self._evolve_physics()
+            
+            # Predict next token
+            predicted_probs = self._compute_token_probabilities()
+            predicted_token = torch.argmax(predicted_probs).item()
+            
+            # Compute prediction error
+            correct = (predicted_token == target)
+            if correct:
+                correct_predictions += 1
+            
+            # CRITICAL: Adjust energy based on prediction!
+            self._adjust_energy_for_prediction(target, predicted_probs)
+            
+            # Update pattern memory
+            if i > 0:
+                prev_token = tokens[i].item()
+                self.pattern_memory[prev_token, target] += 0.1
+            
+            # Compute loss (cross-entropy)
+            loss = -torch.log(predicted_probs[target] + EPS)
+            total_loss += loss.item()
+        
+        # Compute metrics
+        accuracy = correct_predictions / (len(tokens) - 1)
+        avg_loss = total_loss / (len(tokens) - 1)
+        
+        # Record history
+        self.energy_history.append(self._compute_energy())
+        self.accuracy_history.append(accuracy)
+        self.vorticity_history.append(torch.mean(torch.norm(self.vorticity, dim=1)).item())
+        
+        return {
+            'loss': avg_loss,
+            'accuracy': accuracy,
+            'energy': self.energy_history[-1],
+            'vorticity': self.vorticity_history[-1]
+        }
+    
+    def _inject_context_vortices(self, context: torch.Tensor):
+        """Inject vortices for context tokens."""
+        # Clear old vortices
+        self.psi *= 0.95  # Decay
+        
+        # Inject new vortices for each context token
+        for i, token_id in enumerate(context):
+            if token_id >= self.vocab_size:
+                continue
+                
+            # Vortex strength increases with position (recency)
+            strength = (i + 1) / len(context) * 0.1
+            
+            # Create vortex at token position
+            self._create_vortex_at_token(token_id.item(), strength)
+    
+    def _create_vortex_at_token(self, token_id: int, strength: float):
+        """Create a semantic vortex at token position."""
+        # Gaussian vortex centered at token
+        distances = torch.abs(torch.arange(self.vocab_size, device=self.device) - token_id).float()
+        vortex_profile = torch.exp(-distances**2 / (2 * self.vocab_size * 0.05))
+        
+        # Add rotation (this creates the vortex!)
+        for j in range(self.vocab_size):
+            dist = distances[j]
+            if dist < self.vocab_size * 0.1:  # Only nearby tokens
+                # Circular flow around vortex center
+                theta = torch.atan2(j - token_id, 1.0)
+                
+                # Add to wave function with rotation
+                self.psi[j, :, 0] += strength * vortex_profile[j] * torch.cos(theta)
+                self.psi[j, :, 1] += strength * vortex_profile[j] * torch.sin(theta)
+        
+        # Update vorticity
+        self._update_vorticity()
+    
+    def _evolve_physics(self):
+        """Evolve the quantum field one step."""
+        # Compute forces
+        laplacian = self._compute_laplacian()
+        nonlinear = self._compute_nonlinear_term()
+        pattern_force = self._compute_pattern_force()
+        
+        # Total force
+        force = -0.5 * laplacian + 0.1 * nonlinear + 0.1 * pattern_force
+        
+        # Update momentum and position
+        self.momentum = self.momentum - self.dt * force
+        self.psi = self.psi + self.dt * self.momentum
+        
+        # Apply damping
+        self.psi = self.psi / (1 + self.dt * 0.1)
+        self.momentum = self.momentum / (1 + self.dt * 0.1)
+        
+        # Normalize
+        self._normalize_field()
+        
+        # Update derived quantities
+        self._update_vorticity()
+        self._update_metric()
+    
+    def _compute_laplacian(self) -> torch.Tensor:
+        """Compute discrete Laplacian of wave function."""
+        psi_next = torch.roll(self.psi, -1, dims=0)
+        psi_prev = torch.roll(self.psi, 1, dims=0)
+        return (psi_next + psi_prev - 2*self.psi) / self.dt**2
+    
+    def _compute_nonlinear_term(self) -> torch.Tensor:
+        """Compute nonlinear self-interaction."""
+        psi_squared = torch.sum(self.psi**2, dim=-1, keepdim=True)
+        return -self.psi * psi_squared * PHI
+    
+    def _compute_pattern_force(self) -> torch.Tensor:
+        """Force from learned patterns."""
+        force = torch.zeros_like(self.psi)
+        
+        # Pattern memory creates attractive wells
+        for i in range(self.vocab_size):
+            pattern_strength = torch.sum(self.pattern_memory[i])
+            if pattern_strength > 0:
+                # Tokens with strong patterns have deeper potential wells
+                force[i] -= self.psi[i] * pattern_strength * 0.01
+        
+        return force
+    
+    def _adjust_energy_for_prediction(self, target: int, predicted_probs: torch.Tensor):
+        """
+        CRITICAL: Adjust energy based on prediction accuracy.
+        
+        Correct prediction → Lower energy (reward)
+        Wrong prediction → Higher energy (penalty)
+        """
+        # Get prediction error
+        target_prob = predicted_probs[target]
+        error = 1.0 - target_prob
+        
+        # Create energy adjustment at target
+        adjustment = torch.zeros_like(self.psi)
+        
+        if error < 0.5:  # Good prediction
+            # LOWER energy at target (create attractor)
+            adjustment[target] = -self.learning_rate * (1 - error) * self.psi[target]
+        else:  # Bad prediction
+            # RAISE energy at wrong predictions
+            predicted = torch.argmax(predicted_probs)
+            adjustment[predicted] = self.learning_rate * error * self.psi[predicted]
+        
+        # Apply adjustment
+        self.psi = self.psi + adjustment
+        
+        # Create/strengthen vortex at target
+        self._create_vortex_at_token(target, strength=0.05 * (1 - error))
+    
+    def _compute_token_probabilities(self) -> torch.Tensor:
+        """Compute next token probabilities from field state."""
+        # Born rule: P(token) = |<token|ψ>|²
+        prob = torch.sum(self.psi**2, dim=(1, 2))
+        
+        # Boost probability from vorticity (semantic coherence)
+        vortex_strength = torch.norm(self.vorticity, dim=1)
+        prob = prob * (1 + vortex_strength)
+        
+        # Use pattern memory
+        if hasattr(self, 'last_token'):
+            pattern_boost = self.pattern_memory[self.last_token]
+            prob = prob + 0.1 * pattern_boost
+        
+        # Normalize
+        prob = prob / (torch.sum(prob) + EPS)
+        return torch.clamp(prob, min=1e-10)
+    
+    def _update_vorticity(self):
+        """Update vorticity field from wave function."""
+        # Compute velocity field
+        psi_real = self.psi[..., 0]
+        psi_imag = self.psi[..., 1]
+        
+        # Gradient
+        grad_real = torch.roll(psi_real, -1, dims=0) - torch.roll(psi_real, 1, dims=0)
+        grad_imag = torch.roll(psi_imag, -1, dims=0) - torch.roll(psi_imag, 1, dims=0)
+        
+        # Current
+        j_x = psi_real * grad_imag - psi_imag * grad_real
+        
+        # Simple vorticity estimate
+        self.vorticity[:, 0] = torch.mean(j_x, dim=1)
+        self.vorticity[:, 1] = torch.roll(self.vorticity[:, 0], self.vocab_size//3)
+        self.vorticity[:, 2] = torch.roll(self.vorticity[:, 0], 2*self.vocab_size//3)
+    
+    def _update_metric(self):
+        """Update spacetime metric based on energy density."""
+        # Energy density curves spacetime
+        energy_density = torch.sum(self.psi**2, dim=(1, 2))
+        
+        # Update metric components (simplified Einstein equation)
+        for i in range(self.vocab_size):
+            # Curvature proportional to energy
+            curvature = energy_density[i] * 0.1
+            self.metric[i, 0, 0] = -1 - curvature  # Time dilation
+            self.metric[i, 1, 1] = 1 + curvature   # Space contraction
+    
+    def _normalize_field(self):
+        """Normalize wave function to unit probability."""
+        norm = torch.sqrt(torch.sum(self.psi**2) + EPS)
+        if norm > 0:
+            self.psi = self.psi / norm
+    
+    def _compute_energy(self) -> float:
+        """Compute total field energy."""
+        # Kinetic energy
+        T = torch.sum(self.momentum**2) / (2 * self.vocab_size)
+        
+        # Potential energy (including pattern wells)
+        psi_squared = torch.sum(self.psi**2, dim=(1, 2))
+        V = -torch.sum(torch.log(psi_squared + EPS))
+        
+        # Pattern binding energy
+        pattern_energy = -0.1 * torch.sum(self.pattern_memory * psi_squared.unsqueeze(1))
+        
+        total = T + V + pattern_energy
+        return total.item()
+    
+    def generate(self, prompt: str, tokenizer: ShakespeareTokenizer, max_length: int = 200) -> str:
+        """Generate text using learned physics."""
+        tokens = tokenizer.encode(prompt).to(self.device)
+        generated = tokens.clone()
+        
+        with tqdm(total=max_length - len(tokens), desc="Generating") as pbar:
+            while len(generated) < max_length:
+                # Use last 10 tokens as context
+                context = generated[-10:]
+                
+                # Clear field and inject context
+                self.psi *= 0.5  # Partial reset
+                self._inject_context_vortices(context)
+                
+                # Evolve for a few steps
+                for _ in range(5):
+                    self._evolve_physics()
+                
+                # Get probabilities
+                probs = self._compute_token_probabilities()
+                
+                # Sample with temperature
+                probs = torch.pow(probs, 1/self.temperature)
+                probs = probs / probs.sum()
+                
+                # Generate token
+                next_token = torch.multinomial(probs, 1)
+                generated = torch.cat([generated, next_token])
+                
+                self.last_token = next_token.item()
+                pbar.update(1)
+                
+                # Stop if energy is very low (converged)
+                if len(self.energy_history) > 10:
+                    if self.energy_history[-1] < -100:  # Good convergence
+                        print("\n✨ Reached low energy state!")
+                        break
+        
+        return tokenizer.decode(generated)
+
+
+def train_shakespeare_properly(text: str, tokenizer: ShakespeareTokenizer, num_epochs: int = 3):
+    """Train the model properly on Shakespeare."""
+    print("\n🎓 Proper Physics Training on Shakespeare")
+    print("=" * 50)
+    
+    # Create model
+    model = ProperPhysicsLanguageModel(
+        vocab_size=tokenizer.vocab_size,
+        field_dim=64
+    )
+    
+    # Create training sequences
+    seq_length = 50
+    sequences = []
+    
+    for i in range(0, len(text) - seq_length, seq_length // 2):
+        seq_text = text[i:i + seq_length]
+        seq_tokens = tokenizer.encode(seq_text).to(model.device)
+        sequences.append(seq_tokens)
+    
+    print(f"📚 Created {len(sequences)} training sequences")
+    
+    # Training loop
+    for epoch in range(num_epochs):
+        print(f"\n📖 Epoch {epoch + 1}/{num_epochs}")
+        
+        epoch_loss = 0
+        epoch_accuracy = 0
+        
+        # Shuffle sequences
+        indices = torch.randperm(len(sequences))
+        
+        # Train on each sequence
+        for idx in tqdm(indices[:100], desc=f"Epoch {epoch + 1}"):  # Limit for demo
+            seq = sequences[idx]
+            metrics = model.train_on_sequence(seq)
+            
+            epoch_loss += metrics['loss']
+            epoch_accuracy += metrics['accuracy']
+        
+        # Epoch summary
+        avg_loss = epoch_loss / min(100, len(sequences))
+        avg_accuracy = epoch_accuracy / min(100, len(sequences))
+        
+        print(f"  Loss: {avg_loss:.4f}")
+        print(f"  Accuracy: {avg_accuracy:.2%}")
+        print(f"  Energy: {model.energy_history[-1]:.2f}")
+        print(f"  Vorticity: {model.vorticity_history[-1]:.4f}")
+        
+        # Decay temperature
+        model.temperature *= 0.9
+    
+    return model
+
+
+def visualize_proper_training(model: ProperPhysicsLanguageModel):
+    """Visualize the proper training process."""
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig.suptitle('Proper Physics Language Model Training', fontsize=16)
+    
+    # Energy evolution - should DECREASE!
+    axes[0,0].plot(model.energy_history, 'b-', linewidth=2)
+    axes[0,0].set_title('Energy Minimization (Learning!)')
+    axes[0,0].set_xlabel('Training Step')
+    axes[0,0].set_ylabel('Total Energy')
+    axes[0,0].grid(True, alpha=0.3)
+    axes[0,0].axhline(y=0, color='red', linestyle='--', alpha=0.5)
+    
+    # Accuracy - should INCREASE!
+    axes[0,1].plot(model.accuracy_history, 'g-', linewidth=2)
+    axes[0,1].set_title('Prediction Accuracy')
+    axes[0,1].set_xlabel('Training Step')
+    axes[0,1].set_ylabel('Accuracy')
+    axes[0,1].grid(True, alpha=0.3)
+    axes[0,1].axhline(y=1.0, color='red', linestyle='--', alpha=0.5)
+    
+    # Vorticity - should be NON-ZERO!
+    axes[0,2].plot(model.vorticity_history, 'r-', linewidth=2)
+    axes[0,2].set_title('Semantic Vorticity (Pattern Strength)')
+    axes[0,2].set_xlabel('Training Step')
+    axes[0,2].set_ylabel('Mean |ω|')
+    axes[0,2].grid(True, alpha=0.3)
+    
+    # Pattern memory heatmap
+    pattern_strength = model.pattern_memory.cpu().numpy()
+    im = axes[1,0].imshow(pattern_strength, cmap='hot', aspect='auto')
+    axes[1,0].set_title('Learned Token Transitions')
+    axes[1,0].set_xlabel('Next Token')
+    axes[1,0].set_ylabel('Current Token')
+    plt.colorbar(im, ax=axes[1,0])
+    
+    # Wave function magnitude
+    psi_mag = torch.sum(model.psi**2, dim=(1,2)).cpu().numpy()
+    axes[1,1].bar(range(len(psi_mag)), psi_mag)
+    axes[1,1].set_title('Token Probability Distribution')
+    axes[1,1].set_xlabel('Token ID')
+    axes[1,1].set_ylabel('|ψ|²')
+    
+    # Phase space
+    if len(model.energy_history) > 1:
+        axes[1,2].scatter(model.energy_history, model.vorticity_history, 
+                         c=range(len(model.energy_history)), cmap='viridis', alpha=0.6)
+        axes[1,2].set_xlabel('Energy')
+        axes[1,2].set_ylabel('Vorticity')
+        axes[1,2].set_title('Phase Space Evolution')
+        axes[1,2].grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig('proper_physics_training.png', dpi=150, bbox_inches='tight')
+    print("\n📊 Saved visualization to proper_physics_training.png")
+    plt.close()
+
+
+def main():
+    """Run proper physics training on Shakespeare."""
+    # Download Shakespeare
+    print("📥 Downloading Shakespeare...")
+    url = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+    response = requests.get(url)
+    text = response.text[:10000]  # Use first 10k chars for demo
+    
+    # Create tokenizer
+    tokenizer = ShakespeareTokenizer(text)
+    
+    # Train properly
+    model = train_shakespeare_properly(text, tokenizer, num_epochs=3)
+    
+    # Visualize training
+    visualize_proper_training(model)
+    
+    # Generate samples
+    print("\n🎭 Generating with properly trained model...")
+    
+    prompts = [
+        "To be or not to be",
+        "All the world's a stage",
+        "O Romeo"
+    ]
+    
+    for prompt in prompts:
+        print(f"\nPrompt: '{prompt}'")
+        generated = model.generate(prompt, tokenizer, max_length=100)
+        print(f"Generated: {generated}")
+        print("-" * 60)
+    
+    # Final analysis
+    print("\n📊 Final Training Analysis:")
+    print(f"Initial Energy: {model.energy_history[0]:.2f}")
+    print(f"Final Energy: {model.energy_history[-1]:.2f}")
+    print(f"Energy Reduction: {100*(model.energy_history[0] - model.energy_history[-1])/abs(model.energy_history[0]):.1f}%")
+    print(f"Final Accuracy: {model.accuracy_history[-1]:.2%}")
+    print(f"Max Vorticity: {max(model.vorticity_history):.4f}")
+    
+    print("\n✨ This is how physics learns language!")
+    print("   - Energy decreases = Learning")
+    print("   - Vortices form = Patterns emerge")
+    print("   - Accuracy improves = Understanding grows")
+
+
+if __name__ == "__main__":
+    main()

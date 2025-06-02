@@ -259,11 +259,20 @@ def load_checkpoint(checkpoint_path: str, device: str = "cuda") -> Tuple[FieldTh
     # Recreate model
     from model import FieldConfig, FieldTheoreticLM
     config = FieldConfig(**checkpoint["config"])
+    
+    # Ensure float32 dtype
+    if not hasattr(config, 'dtype'):
+        config.dtype = torch.float32
+    
     model = FieldTheoreticLM(config)
     
     # Load state
     model.load_state_dict(checkpoint["model_state"])
     model.crystal_memory.W_crystal = checkpoint["crystal_state"]
+    
+    # Ensure all parameters use float32
+    for param in model.parameters():
+        param.data = param.data.to(torch.float32)
     
     return model, checkpoint
 
@@ -298,4 +307,4 @@ if __name__ == "__main__":
         seq_lengths=[128]
     )
     
-    print("\n✓ Inference module validated")
+    print("\n[PASS] Inference module validated")

@@ -6,7 +6,7 @@ Physics: Coherence-driven collapse to discrete tokens from continuous field
 import torch
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from scipy.stats import levy_stable
 
 PHI = (1 + np.sqrt(5)) / 2
@@ -24,7 +24,7 @@ class FieldCollapse(torch.nn.Module):
         
         # Measurement operators (vocab_size observable bases)
         self.measurement_ops = torch.nn.Parameter(
-            torch.randn(vocab_size, d_model) / np.sqrt(d_model)
+            torch.randn(vocab_size, d_model, dtype=torch.float32) / np.sqrt(d_model)
         )
         
     def compute_coherence(self, field: torch.Tensor) -> torch.Tensor:
@@ -37,7 +37,7 @@ class FieldCollapse(torch.nn.Module):
         batch, seq_len, d_model = field.shape
         
         # Compute covariance in local windows
-        coherence = torch.zeros(batch, seq_len, device=field.device)
+        coherence = torch.zeros(batch, seq_len, device=field.device, dtype=torch.float32)
         
         for i in range(seq_len):
             # Window around position i
@@ -142,15 +142,17 @@ class LevyFieldSampler(torch.nn.Module):
             # Lévy flight step
             # Generate on CPU due to scipy
             levy_steps = []
-            for _ in range(batch_size):
+            for b in range(batch_size):
                 step = levy_stable.rvs(self.alpha, beta=0, scale=0.1)
-                levy_steps.append(step)
+                # Convert scalar to list with one element
+                levy_steps.append(float(step))
             
-            levy_steps = torch.tensor(levy_steps, device=device)
+            # Convert list to tensor
+            levy_steps = torch.tensor(levy_steps, device=device, dtype=torch.float32)
             
             # Convert to token space movement
             step_size = torch.abs(levy_steps) * self.vocab_size * 0.1
-            direction = torch.sign(torch.randn(batch_size, device=device))
+            direction = torch.sign(torch.randn(batch_size, device=device, dtype=torch.float32))
             
             # New position
             new_pos = current_pos + (step_size * direction).long()
@@ -239,7 +241,7 @@ class BeamFieldSearch:
                 
                 # Get token probabilities
                 # (Simplified - would use FieldCollapse in practice)
-                probs = torch.randn(batch_size, 50257, device=device).softmax(dim=-1)
+                probs = torch.randn(batch_size, 50257, device=device, dtype=torch.float32).softmax(dim=-1)
                 
                 # Get top-k tokens
                 topk_probs, topk_indices = torch.topk(probs, self.beam_size, dim=-1)
@@ -259,7 +261,7 @@ class BeamFieldSearch:
         
         # Return best beam
         best_field, best_tokens, best_score = beams[0]
-        return best_tokens, torch.tensor([best_score])
+        return best_tokens, torch.tensor([best_score], dtype=torch.float32)
 
 # Validation
 if __name__ == "__main__":
@@ -267,27 +269,27 @@ if __name__ == "__main__":
     
     # Test field collapse
     collapse = FieldCollapse(vocab_size=1000, d_model=64).cuda()
-    field = torch.randn(2, 16, 64).cuda()
+    field = torch.randn(2, 16, 64, dtype=torch.float32).cuda()
     field = field / torch.norm(field, dim=-1, keepdim=True)
     
     tokens, probs = collapse(field)
     print(f"Collapsed tokens shape: {tokens.shape}")
     print(f"Collapse probabilities shape: {probs.shape}")
-    print(f"Collapsed positions: {(tokens >= 0).sum()} / {tokens.numel()}")
+    print(f"Collapsed positions: {(tokens >= 0).sum().item()} / {tokens.numel()}")
     
     # Test coherence computation
     coherence = collapse.compute_coherence(field)
-    print(f"\nCoherence range: [{coherence.min():.3f}, {coherence.max():.3f}]")
+    print(f"\nCoherence range: [{coherence.min().item():.3f}, {coherence.max().item():.3f}]")
     
     # Test Lévy sampler
     levy_sampler = LevyFieldSampler(vocab_size=1000)
-    logits = torch.randn(2, 1000).cuda()
+    logits = torch.randn(2, 1000, dtype=torch.float32).cuda()
     levy_samples = levy_sampler(logits, num_samples=5)
-    print(f"\nLévy samples shape: {levy_samples.shape}")
+    print(f"\nLevy samples shape: {levy_samples.shape}")
     
     # Test nucleus sampler
     nucleus_sampler = NucleusFieldSampler(top_p=0.9)
     sampled = nucleus_sampler(probs, coherence)
     print(f"Nucleus samples shape: {sampled.shape}")
     
-    print("\n✓ Field collapse validated")
+    print("\n[PASS] Field collapse validated")

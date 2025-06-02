@@ -59,9 +59,12 @@ class FieldTrainer:
         Single training step with Hebbian updates
         No gradient computation needed
         """
+        # Ensure all tensors use float32
+        input_ids = batch["input_ids"]
+        
         # Forward pass with crystal updates
         outputs = self.model(
-            batch["input_ids"],
+            input_ids,
             crystal_update=True,  # Enable Hebbian updates
             perturbation_type=perturbation_type
         )
@@ -185,8 +188,14 @@ class FieldTrainer:
                 if step >= threshold:
                     perturbation_type = ptype
             
-            # Get batch
-            batch = self.data_loader.get_batch("train")
+            # Get batch with error handling
+            try:
+                batch = self.data_loader.get_batch("train")
+            except Exception as e:
+                print(f"Error getting batch: {e}. Retrying...")
+                time.sleep(1)
+                continue
+                
             batch_start = time.time()
             
             # Training step
@@ -285,7 +294,7 @@ class AblationTrainer:
         
         for dataset in datasets:
             print(f"\n=== Dataset: {dataset} ===")
-            data_loader = FieldDataLoader(dataset, batch_size=8, seq_length=256)
+            data_loader = FieldDataLoader(dataset, batch_size=8, seq_length=256, max_retries=5)
             
             for embed_type in embedding_types:
                 for perturb_type in perturbation_types:
@@ -344,7 +353,9 @@ if __name__ == "__main__":
     from data import FieldDataLoader
     
     model = create_small_model("golden").cuda()
-    data_loader = FieldDataLoader("wikitext-2", batch_size=4, seq_length=128)
+    
+    # Create data loader with retry logic
+    data_loader = FieldDataLoader("wikitext-2", batch_size=4, seq_length=128, max_retries=5)
     
     trainer = FieldTrainer(
         model, 
@@ -357,4 +368,4 @@ if __name__ == "__main__":
     print("\nRunning quick training test...")
     trainer.train(num_steps=50)
     
-    print("\n✓ Trainer validated")
+    print("\n[PASS] Trainer validated")

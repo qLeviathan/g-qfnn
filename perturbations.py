@@ -49,8 +49,8 @@ class LevyPerturbation(PerturbationBase):
                         self.alpha, beta=0, scale=self.scale
                     )
         
-        # Convert to tensor
-        noise = torch.tensor(levy_noise, device=device, dtype=field.dtype)
+        # Convert to tensor with explicit dtype
+        noise = torch.tensor(levy_noise, device=device, dtype=torch.float32)
         
         # Apply perturbation with phase preservation
         perturbed = field + noise
@@ -83,8 +83,9 @@ class BetaPerturbation(PerturbationBase):
         beta = seq_len / 2.0
         
         # Sample from Beta distribution
-        beta_dist = dist.Beta(alpha, beta)
-        beta_samples = beta_dist.sample((batch, seq_len, 1)).to(device)
+        beta_dist = dist.Beta(torch.tensor([alpha], dtype=torch.float32), 
+                             torch.tensor([beta], dtype=torch.float32))
+        beta_samples = beta_dist.sample((batch, seq_len, 1)).to(device).to(torch.float32)
         
         # Inverse transform for time-step
         dt = 1.0 / (beta_samples + 1e-6)
@@ -93,7 +94,8 @@ class BetaPerturbation(PerturbationBase):
         dt = torch.clamp(dt * self.scale, 0.001, 0.1)
         
         # Generate Gaussian noise modulated by dt
-        noise = torch.randn_like(field) * torch.sqrt(dt)
+        # Expand dt to match field dimensions for correct broadcasting
+        noise = torch.randn_like(field, dtype=torch.float32) * torch.sqrt(dt.reshape(batch, seq_len, 1))
         
         # Apply perturbation
         perturbed = field + noise
@@ -192,7 +194,7 @@ class QuantumPerturbation(PerturbationBase):
                 perturbed[b] = 0.9 * collapsed + 0.1 * field[b]
         
         # Add small quantum noise
-        quantum_noise = torch.randn_like(field) * self.scale * 0.1
+        quantum_noise = torch.randn_like(field, dtype=torch.float32) * self.scale * 0.1
         perturbed = perturbed + quantum_noise
         
         return perturbed
@@ -202,12 +204,12 @@ if __name__ == "__main__":
     print("=== Perturbation Module Validation ===")
     
     # Test field
-    field = torch.randn(2, 16, 32).cuda()
+    field = torch.randn(2, 16, 32, dtype=torch.float32).cuda()
     field = field / torch.norm(field, dim=-1, keepdim=True)
     
     # Test each perturbation
     perturbations = {
-        "Lévy": LevyPerturbation(),
+        "Levy": LevyPerturbation(),
         "Beta": BetaPerturbation(),
         "Adaptive": AdaptivePerturbation(),
         "Quantum": QuantumPerturbation()
@@ -225,4 +227,4 @@ if __name__ == "__main__":
         print(f"  Max jump: {max_jump:.4f}")
         print(f"  Shape preserved: {perturbed.shape == field.shape}")
     
-    print("\n✓ All perturbations validated")
+    print("\n[PASS] All perturbations validated")
