@@ -8,6 +8,7 @@ from .log_coords import (
 
 from .log_hebbian import LogHebbianNetwork
 from .dual_vortex import DualVortexField
+from .LogCylindricalCoords import LogCylindricalCoords
 
 __all__ = [
     'log_cartesian_distance',
@@ -16,5 +17,6 @@ __all__ = [
     'compute_attention_weights',
     'log_cylindrical_batch_distance',
     'LogHebbianNetwork',
-    'DualVortexField'
+    'DualVortexField',
+    'LogCylindricalCoords'
 ]
