@@ -452,9 +452,27 @@ class RelativisticVortexSpacetime:
         return fig, fig2
 
 # Create and run the visualization
-spacetime_vortex = RelativisticVortexSpacetime(c=1.0, alpha=1.5)
-fig1, fig2 = spacetime_vortex.visualize_spacetime_vortex()
-plt.show()
+if __name__ == "__main__":
+    # Create output directory if it doesn't exist
+    import os
+    output_dir = "outputs/physics"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Run the visualization
+    spacetime_vortex = RelativisticVortexSpacetime(c=1.0, alpha=1.5)
+    fig1, fig2 = spacetime_vortex.visualize_spacetime_vortex()
+    
+    # Save the figures
+    fig1_path = os.path.join(output_dir, "relativistic_vortex_physics.png")
+    fig2_path = os.path.join(output_dir, "relativistic_vortex_energy.png")
+    
+    fig1.savefig(fig1_path, dpi=300)
+    fig2.savefig(fig2_path, dpi=300)
+    
+    print(f"\nFigures saved to: {fig1_path} and {fig2_path}")
+    
+    # Display the figures
+    plt.show()
 
 # Print theoretical insights
 print("\n=== SUPERLUMINAL VORTEX MECHANISMS ===\n")

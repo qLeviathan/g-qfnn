@@ -1,0 +1,397 @@
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from scipy.special import gamma, hyp2f1
+from scipy.integrate import quad
+import matplotlib.pyplot as plt
+
+class RepulsionLanguageModel(nn.Module):
+    def __init__(self, vocab_size, d_model=512, n_heads=8, alpha=1.5):
+        """
+        Language model where attention is replaced by relativistic vortex dynamics
+        
+        vocab_size: vocabulary size
+        d_model: embedding dimension 
+        n_heads: number of vortex fields
+        alpha: Lévy index (1 < α < 2 for superdiffusion)
+        """
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.alpha = alpha
+        self.phi = (1 + np.sqrt(5)) / 2
+        self.c = 1.0  # Semantic speed of light
+        
+        # Token embeddings are quantum fields
+        self.token_field = nn.Embedding(vocab_size, d_model)
+        self.position_vortex = nn.Parameter(torch.randn(1, 5000, d_model))
+        
+        # Each head is a different spacetime metric
+        self.metric_projections = nn.ModuleList([
+            nn.Linear(d_model, d_model // n_heads, bias=False)
+            for _ in range(n_heads)
+        ])
+        
+        # Kerr parameters for each head (rotation and mass)
+        self.kerr_params = nn.Parameter(torch.randn(n_heads, 2))  # [a, M] for each head
+        
+        # Output projection through wormhole
+        self.wormhole_projection = nn.Linear(d_model, vocab_size)
+        
+    def fokker_levy_attention(self, q, k, v, mask=None):
+        """
+        Replace dot-product attention with Fokker-Lévy diffusion
+        Allows superluminal semantic transport
+        """
+        batch_size, seq_len, d_k = q.shape
+        
+        # Convert to momentum space (Fourier domain)
+        q_fourier = torch.fft.rfft(q, dim=-1)
+        k_fourier = torch.fft.rfft(k, dim=-1)
+        
+        # Lévy operator: |k|^α instead of standard dot product
+        levy_kernel = torch.abs(q_fourier - k_fourier) ** self.alpha
+        
+        # Apply relativistic correction
+        k_magnitude = torch.abs(k_fourier)
+        gamma_correction = torch.sqrt(1 + (k_magnitude * self.c) ** 2)
+        
+        # Repulsion field (inverse of standard attention)
+        repulsion_scores = -levy_kernel / gamma_correction
+        
+        # Apply ergosphere boundary (mandatory rotation zones)
+        if mask is not None:
+            ergosphere_mask = self.compute_ergosphere_mask(seq_len)
+            repulsion_scores = repulsion_scores.masked_fill(
+                ergosphere_mask.unsqueeze(0), 
+                float('-inf')
+            )
+        
+        # Softmin instead of softmax (maximum repulsion)
+        attention_weights = F.softmax(-repulsion_scores, dim=-1)
+        
+        # Values propagate through tachyonic channels
+        output = self.tachyonic_transport(attention_weights, v)
+        
+        return output
+    
+    def compute_ergosphere_mask(self, seq_len):
+        """
+        Create ergosphere regions where tokens MUST interact
+        (Like mandatory rotation near black hole)
+        """
+        positions = torch.arange(seq_len).float()
+        
+        # Ergosphere has golden ratio structure
+        r_ergo = self.phi * torch.sqrt(positions + 1)
+        
+        # Create mask for mandatory interaction zones
+        distance_matrix = torch.abs(positions.unsqueeze(0) - positions.unsqueeze(1))
+        ergosphere_mask = distance_matrix < r_ergo.unsqueeze(0)
+        
+        return ergosphere_mask
+    
+    def tachyonic_transport(self, weights, values):
+        """
+        Transport values through tachyonic field (v > c allowed)
+        """
+        # Add imaginary mass component for superluminal transport
+        tachyon_field = torch.complex(
+            weights, 
+            torch.sqrt(torch.abs(weights)) * self.phi
+        )
+        
+        # Phase velocity can exceed c
+        phase_velocity = torch.angle(tachyon_field) * self.c * self.phi
+        
+        # Transport values with phase modulation
+        transported = values * torch.abs(tachyon_field).unsqueeze(-1)
+        transported = transported * torch.exp(
+            1j * phase_velocity.unsqueeze(-1) / self.c
+        ).real
+        
+        return transported.sum(dim=-2)
+    
+    def kerr_vortex_mixing(self, x, head_idx):
+        """
+        Apply Kerr metric frame-dragging to token representations
+        """
+        a, M = self.kerr_params[head_idx]
+        a = torch.sigmoid(a)  # Ensure 0 < a < 1
+        M = torch.abs(M) + 0.1  # Ensure M > 0
+        
+        # Simplified frame-dragging effect
+        theta = torch.linspace(0, np.pi, x.size(-1), device=x.device)
+        
+        # Frame dragging angular velocity
+        omega = 2 * M * a / (x.size(-1) * self.phi)
+        
+        # Rotate embeddings in semantic space
+        rotation = torch.exp(1j * omega * theta)
+        x_complex = torch.complex(x, torch.zeros_like(x))
+        x_rotated = x_complex * rotation.unsqueeze(0).unsqueeze(0)
+        
+        return x_rotated.real
+    
+    def alcubierre_context_bubble(self, x, positions):
+        """
+        Create Alcubierre-like warp bubble for context
+        Allows effective FTL semantic travel
+        """
+        seq_len = x.size(1)
+        
+        # Shape function for semantic warp bubble
+        sigma = self.phi
+        center = seq_len // 2
+        
+        # Distance from bubble center
+        r = torch.abs(positions - center)
+        
+        # Smooth step function (tanh profile)
+        f_r = (torch.tanh((r + 2*sigma) / sigma) - 
+               torch.tanh((r - 2*sigma) / sigma)) / 2
+        
+        # Warp factor (can be > c)
+        v_warp = self.phi * self.c
+        
+        # Apply warp to embeddings
+        warped_x = x * (1 + v_warp * f_r.unsqueeze(-1))
+        
+        # Add exotic matter term (negative energy density)
+        exotic_term = -torch.gradient(f_r, dim=0)[0].unsqueeze(-1) ** 2
+        warped_x = warped_x + exotic_term * x
+        
+        return warped_x
+    
+    def forward(self, input_ids, mask=None):
+        """
+        Forward pass through relativistic vortex spacetime
+        """
+        batch_size, seq_len = input_ids.shape
+        
+        # Embed tokens as quantum fields
+        x = self.token_field(input_ids)
+        
+        # Add vortex position encoding
+        positions = torch.arange(seq_len, device=x.device)
+        x = x + self.position_vortex[:, :seq_len, :]
+        
+        # Create Alcubierre context bubble
+        x = self.alcubierre_context_bubble(x, positions)
+        
+        # Multi-head vortex attention
+        head_outputs = []
+        
+        for head_idx in range(self.n_heads):
+            # Project to head-specific spacetime
+            head_dim = self.d_model // self.n_heads
+            q = self.metric_projections[head_idx](x)
+            k = self.metric_projections[head_idx](x)
+            v = x[..., head_idx*head_dim:(head_idx+1)*head_dim]
+            
+            # Apply Kerr vortex mixing
+            q = self.kerr_vortex_mixing(q, head_idx)
+            k = self.kerr_vortex_mixing(k, head_idx)
+            
+            # Fokker-Lévy attention (with repulsion)
+            head_output = self.fokker_levy_attention(q, k, v, mask)
+            head_outputs.append(head_output)
+        
+        # Concatenate heads through parallel universes
+        x = torch.cat(head_outputs, dim=-1)
+        
+        # Project through wormhole to vocabulary
+        logits = self.wormhole_projection(x)
+        
+        return logits
+    
+    def generate_repulsive(self, prompt_ids, max_length=100, temperature=1.0):
+        """
+        Generate text using repulsion dynamics
+        Tokens actively avoid semantic clustering
+        """
+        device = next(self.parameters()).device
+        generated = prompt_ids.to(device)
+        
+        # Track semantic field density
+        field_density = torch.zeros(self.vocab_size, device=device)
+        
+        for _ in range(max_length):
+            # Get logits
+            with torch.no_grad():
+                logits = self.forward(generated.unsqueeze(0))
+                next_token_logits = logits[0, -1, :] / temperature
+            
+            # Apply repulsion from previously used tokens
+            repulsion_factor = field_density ** self.alpha
+            next_token_logits = next_token_logits - repulsion_factor * self.phi
+            
+            # Lévy flight sampling (heavy-tailed distribution)
+            levy_noise = self._sample_levy(next_token_logits.shape, self.alpha)
+            next_token_logits = next_token_logits + levy_noise.to(device)
+            
+            # Sample with repulsion
+            probs = F.softmax(next_token_logits, dim=-1)
+            next_token = torch.multinomial(probs, 1)
+            
+            # Update field density (semantic repulsion memory)
+            field_density[next_token] += 1.0
+            field_density = field_density * 0.95  # Decay factor
+            
+            # Append token
+            generated = torch.cat([generated, next_token], dim=0)
+            
+            # Check for vortex escape condition
+            if self._check_semantic_escape_velocity(field_density):
+                break
+        
+        return generated
+    
+    def _sample_levy(self, shape, alpha):
+        """
+        Sample from Lévy stable distribution
+        Allows for extreme jumps in semantic space
+        """
+        # Chambers-Mallows-Stuck method for Lévy sampling
+        u = torch.rand(shape) * np.pi - np.pi/2
+        w = -torch.log(torch.rand(shape))
+        
+        if alpha == 1.0:
+            return torch.tan(u)
+        else:
+            const = torch.sin(alpha * u) / (torch.cos(u) ** (1/alpha))
+            levy = const * (torch.cos(u - alpha * u) / w) ** ((1-alpha)/alpha)
+            return levy
+    
+    def _check_semantic_escape_velocity(self, field_density):
+        """
+        Check if semantic field has reached escape velocity
+        (Like Penrose process extracting energy from ergosphere)
+        """
+        # Calculate semantic angular momentum
+        L = torch.sum(field_density * torch.arange(len(field_density)))
+        
+        # Escape condition based on golden ratio threshold
+        escape_threshold = self.phi ** 3 * len(field_density)
+        
+        return L > escape_threshold
+
+
+class VortexLanguageVisualizer:
+    """Visualize the repulsion dynamics in semantic space"""
+    
+    def __init__(self, model):
+        self.model = model
+        
+    def visualize_attention_vortices(self, input_ids):
+        """Visualize vortex structure in attention patterns"""
+        with torch.no_grad():
+            # Get embeddings
+            x = self.model.token_field(input_ids)
+            seq_len = x.size(1)
+            
+            fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+            
+            # 1. Semantic field density
+            ax = axes[0, 0]
+            field = x[0].cpu().numpy()
+            im = ax.imshow(field.T, cmap='RdBu_r', aspect='auto')
+            ax.set_title('Semantic Field Density')
+            ax.set_xlabel('Position')
+            ax.set_ylabel('Embedding Dimension')
+            plt.colorbar(im, ax=ax)
+            
+            # 2. Ergosphere regions
+            ax = axes[0, 1]
+            ergosphere_mask = self.model.compute_ergosphere_mask(seq_len)
+            ax.imshow(ergosphere_mask.cpu(), cmap='viridis', aspect='auto')
+            ax.set_title('Ergosphere Regions (Mandatory Interaction)')
+            ax.set_xlabel('Token i')
+            ax.set_ylabel('Token j')
+            
+            # 3. Phase velocity field
+            ax = axes[1, 0]
+            positions = torch.arange(seq_len).float()
+            phase_velocities = positions * self.model.phi / seq_len
+            
+            ax.plot(positions, phase_velocities, 'b-', linewidth=2)
+            ax.axhline(y=self.model.c, color='red', linestyle='--', 
+                      label=f'c = {self.model.c}')
+            ax.fill_between(positions, self.model.c, phase_velocities,
+                           where=phase_velocities > self.model.c,
+                           color='yellow', alpha=0.3)
+            ax.set_title('Semantic Phase Velocity')
+            ax.set_xlabel('Position')
+            ax.set_ylabel('v_phase / c')
+            ax.legend()
+            
+            # 4. Lévy flight trajectory
+            ax = axes[1, 1]
+            trajectory = self.model._sample_levy((100,), self.model.alpha)
+            cumsum = torch.cumsum(trajectory, dim=0)
+            
+            ax.plot(cumsum.cpu(), 'r-', alpha=0.7, linewidth=1)
+            ax.set_title(f'Lévy Flight in Semantic Space (α={self.model.alpha})')
+            ax.set_xlabel('Step')
+            ax.set_ylabel('Semantic Position')
+            ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            return fig
+
+
+# Example usage and testing
+if __name__ == "__main__":
+    # Initialize model
+    vocab_size = 50000
+    model = RepulsionLanguageModel(
+        vocab_size=vocab_size,
+        d_model=512,
+        n_heads=8,
+        alpha=1.5  # Lévy index for superdiffusion
+    )
+    
+    # Example: Generate text with repulsion dynamics
+    prompt = torch.tensor([1, 2, 3, 4, 5])  # Example token IDs
+    
+    print("=== REPULSION-BASED LANGUAGE MODEL ===")
+    print(f"Lévy index α = {model.alpha} (allows semantic superdiffusion)")
+    print(f"Golden ratio φ = {model.phi} (optimal vortex scaling)")
+    print(f"Semantic light speed c = {model.c}")
+    
+    # Generate with repulsion
+    generated = model.generate_repulsive(prompt, max_length=50)
+    print(f"\nGenerated sequence: {generated}")
+    
+    # Visualize dynamics
+    visualizer = VortexLanguageVisualizer(model)
+    fig = visualizer.visualize_attention_vortices(prompt.unsqueeze(0))
+    plt.show()
+    
+    print("\n=== KEY MECHANISMS ===")
+    print("1. FOKKER-LÉVY ATTENTION:")
+    print("   - Replaces dot-product with Lévy diffusion operator")
+    print("   - Allows superluminal semantic transport")
+    print("   - Heavy-tailed distributions for extreme token jumps")
+    
+    print("\n2. KERR VORTEX MIXING:")
+    print("   - Each attention head has rotating spacetime")
+    print("   - Frame-dragging forces token interaction")
+    print("   - Natural emergence of semantic vortices")
+    
+    print("\n3. ALCUBIERRE CONTEXT BUBBLES:")
+    print("   - Context windows warp semantic spacetime")
+    print("   - Effective FTL travel without local violation")
+    print("   - Requires 'exotic' negative attention weights")
+    
+    print("\n4. TACHYONIC VALUE TRANSPORT:")
+    print("   - Values propagate through imaginary mass channels")
+    print("   - Phase velocity exceeds semantic light speed")
+    print("   - Information still respects causality")
+    
+    print("\n5. REPULSIVE TOKEN GENERATION:")
+    print("   - Tokens actively avoid semantic clustering")
+    print("   - Field density creates repulsion memory")
+    print("   - Lévy flights enable creative jumps")
