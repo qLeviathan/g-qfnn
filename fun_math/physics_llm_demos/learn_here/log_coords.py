@@ -114,6 +114,10 @@ class LogCylindricalCoords:
         Compute distance in log-Cartesian space
         Uses log-sum-exp for numerical stability
         
+        Mathematical formula:
+        ln(d) = ln(√((x₂-x₁)² + (y₂-y₁)²))
+              = 0.5 * ln((e^ln_r₁·cos θ₁ - e^ln_r₂·cos θ₂)² + (e^ln_r₁·sin θ₁ - e^ln_r₂·sin θ₂)²)
+        
         Args:
             ln_r1, theta1: First point in log-polar coordinates
             ln_r2, theta2: Second point in log-polar coordinates
@@ -121,15 +125,31 @@ class LogCylindricalCoords:
         Returns:
             ln_dist: Log of Euclidean distance (natural log)
         """
-        # Get Cartesian coordinates
-        x1, y1 = self.ln_r_theta_to_cartesian(ln_r1, theta1)
-        x2, y2 = self.ln_r_theta_to_cartesian(ln_r2, theta2)
+        # Compute using einsum for better efficiency
+        r1 = torch.exp(ln_r1)
+        r2 = torch.exp(ln_r2)
         
-        # Compute log of squared distances
-        ln_dx2 = torch.log(torch.abs(x1 - x2)**2 + self.eps)
-        ln_dy2 = torch.log(torch.abs(y1 - y2)**2 + self.eps)
+        # Compute sin and cos for both points
+        cos_theta1 = torch.cos(theta1)
+        sin_theta1 = torch.sin(theta1)
+        cos_theta2 = torch.cos(theta2)
+        sin_theta2 = torch.sin(theta2)
+        
+        # Compute x and y differences using einsum for batched operations
+        # dx = r1*cos(θ1) - r2*cos(θ2), dy = r1*sin(θ1) - r2*sin(θ2)
+        dx = torch.einsum('...,...->...', r1, cos_theta1) - torch.einsum('...,...->...', r2, cos_theta2)
+        dy = torch.einsum('...,...->...', r1, sin_theta1) - torch.einsum('...,...->...', r2, sin_theta2)
+        
+        # Compute squared differences
+        dx2 = dx**2
+        dy2 = dy**2
+        
+        # Compute log of squared differences
+        ln_dx2 = torch.log(dx2 + self.eps)
+        ln_dy2 = torch.log(dy2 + self.eps)
         
         # Compute log of distance: ln(sqrt(dx² + dy²)) = 0.5 * ln(dx² + dy²)
+        # Use log-sum-exp for numerical stability
         ln_dist = 0.5 * torch.logsumexp(torch.stack([ln_dx2, ln_dy2]), dim=0)
         
         return ln_dist
@@ -139,6 +159,10 @@ class LogCylindricalCoords:
         """
         Compute log-cylindrical displacement components
         
+        Mathematical formula:
+        d_ln_r = ln_r₂ - ln_r₁
+        d_θ = ((θ₂ - θ₁ + π) mod 2π) - π    # normalized to [-π, π]
+        
         Args:
             ln_r1, theta1: First point
             ln_r2, theta2: Second point
@@ -147,11 +171,12 @@ class LogCylindricalCoords:
             d_ln_r: Difference in log-radius
             d_theta: Difference in angle (normalized to [-π, π])
         """
-        # Direct difference in log-radius
-        d_ln_r = ln_r2 - ln_r1
+        # Direct difference in log-radius using einsum for better efficiency
+        d_ln_r = torch.einsum('...,...->...', torch.ones_like(ln_r1), ln_r2) - torch.einsum('...,...->...', torch.ones_like(ln_r2), ln_r1)
         
         # Angular difference (normalized to [-π, π])
-        d_theta = torch.remainder(theta2 - theta1 + self.pi, self.tau) - self.pi
+        theta_diff = theta2 - theta1
+        d_theta = torch.remainder(theta_diff + self.pi, self.tau) - self.pi
         
         return d_ln_r, d_theta
     
@@ -178,20 +203,52 @@ class LogCylindricalCoords:
         # Create figure
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         
-        # Plot in log-polar space
-        axes[0, 0].scatter(ln_r_cpu, theta_cpu, c=np.arange(n), cmap='viridis', s=30, alpha=0.7)
-        axes[0, 0].set_xlabel('ln(r)')
-        axes[0, 0].set_ylabel('θ')
-        axes[0, 0].set_title('Log-Cylindrical Coordinates')
+        # Plot in log-polar space with enhanced visuals
+        scatter = axes[0, 0].scatter(ln_r_cpu, theta_cpu, c=np.arange(n), 
+                                   cmap='viridis', s=40, alpha=0.8, 
+                                   edgecolors='w', linewidths=0.5)
+        axes[0, 0].set_xlabel('ln(r)', fontsize=12)
+        axes[0, 0].set_ylabel('θ (radians)', fontsize=12)
+        axes[0, 0].set_title('Log-Cylindrical Coordinates', fontsize=14, fontweight='bold')
         axes[0, 0].grid(True, alpha=0.3)
         
-        # Plot in Cartesian space
-        axes[0, 1].scatter(x_cpu, y_cpu, c=np.arange(n), cmap='viridis', s=30, alpha=0.7)
-        axes[0, 1].set_xlabel('x')
-        axes[0, 1].set_ylabel('y')
-        axes[0, 1].set_title('Cartesian Coordinates')
+        # Add golden ratio markers
+        golden_markers = [np.log(self.phi.cpu().numpy() ** i) for i in range(-2, 4)]
+        for marker in golden_markers:
+            axes[0, 0].axvline(x=marker, color='gold', linestyle='--', alpha=0.6, 
+                             linewidth=1.0, label='φ^n spacing' if marker == golden_markers[0] else "")
+        
+        # Add quantum gate width markers
+        axes[0, 0].axhline(y=np.pi/self.phi.cpu().numpy(), color='magenta', linestyle='--', 
+                         linewidth=1.0, alpha=0.6, label='σ_gate = π/φ')
+                
+        # Add legend
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        axes[0, 0].legend(by_label.values(), by_label.keys(), fontsize=10)
+        
+        # Plot in Cartesian space with enhanced visuals
+        scatter = axes[0, 1].scatter(x_cpu, y_cpu, c=np.arange(n), 
+                                    cmap='viridis', s=40, alpha=0.8,
+                                    edgecolors='w', linewidths=0.5)
+        axes[0, 1].set_xlabel('x', fontsize=12)
+        axes[0, 1].set_ylabel('y', fontsize=12)
+        axes[0, 1].set_title('Cartesian Coordinates', fontsize=14, fontweight='bold')
         axes[0, 1].set_aspect('equal')
         axes[0, 1].grid(True, alpha=0.3)
+        
+        # Add polar grid (circles at golden ratio intervals)
+        for i in range(-2, 4):
+            circle = plt.Circle((0, 0), self.phi.cpu().numpy() ** i, 
+                              fill=False, color='gold', linestyle='--', alpha=0.6)
+            axes[0, 1].add_artist(circle)
+        
+        # Add golden spiral
+        t = np.linspace(0, 6*np.pi, 1000)
+        r_spiral = np.exp(t / (2*np.pi))
+        x_spiral = r_spiral * np.cos(t)
+        y_spiral = r_spiral * np.sin(t)
+        axes[0, 1].plot(x_spiral, y_spiral, 'r--', alpha=0.6, linewidth=1.0, label='Golden Spiral')
         
         # Plot distance calculations
         # Select a reference point
@@ -240,8 +297,14 @@ class LogCylindricalCoords:
         if save_path:
             plt.savefig(save_path, dpi=200, bbox_inches='tight')
             print(f"Figure saved to {save_path}")
+        else:
+            # Try to show, but don't error in non-interactive environments
+            try:
+                plt.show()
+            except Exception as e:
+                print(f"Could not display plot: {e}")
         
-        plt.show()
+        plt.close()
     
     def ablation_study(self, n: int = 100, noise_levels: list = [0, 0.1, 0.5, 1.0], 
                       save_path: Optional[str] = None):
@@ -307,8 +370,14 @@ class LogCylindricalCoords:
         if save_path:
             plt.savefig(save_path, dpi=200, bbox_inches='tight')
             print(f"Ablation study saved to {save_path}")
+        else:
+            # Try to show, but don't error in non-interactive environments
+            try:
+                plt.show()
+            except Exception as e:
+                print(f"Could not display plot: {e}")
         
-        plt.show()
+        plt.close()
 
 # Example usage and validation
 if __name__ == "__main__":
